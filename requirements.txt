@@ -1,0 +1,22 @@
+# Insurance Fraud Graph Intelligence Platform
+# P&C Insurance Demo - GraphRAG for Fraud Detection
+
+# Core Framework
+streamlit>=1.31.0
+
+# Graph Database
+neo4j>=5.15.0
+
+# Graph Visualization
+streamlit-agraph>=0.0.45
+
+# LLM Integration - Multiple providers supported
+groq>=0.4.0                 # Groq - Llama 3.3 70B (recommended free option)
+google-generativeai>=0.3.2  # Google Gemini
+openai>=1.0.0               # OpenRouter & Cerebras (OpenAI-compatible APIs)
+
+# Utilities
+python-dotenv>=1.0.0
+requests>=2.28.0
+
+

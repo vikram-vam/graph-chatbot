@@ -5,8 +5,12 @@ Graph-Powered Investigation Platform for SIU Teams
 Demonstrates how graph database technology reveals hidden fraud networks
 that traditional relational methods consistently miss.
 
-Version: 2.1 - Added Investigation Assistant; synced with refined data model;
-               Azure OpenAI primary; standalone OpenAI removed
+Version: 2.2 - Investigation Assistant optimized for GPT-4o-mini
+               - Split reasoning/Cypher generation
+               - Deterministic complexity routing
+               - Cypher retry with error feedback
+               - Conversational synthesis with follow-ups
+               - Visualization enrichment
 """
 
 import streamlit as st
@@ -107,8 +111,6 @@ def get_neo4j_driver():
         uri = st.secrets["neo4j"]["uri"]
         user = st.secrets["neo4j"]["user"]
         password = st.secrets["neo4j"]["password"]
-        
-        # NOTE: neo4j+ssc hack removed per audit — AuraDB uses valid TLS certs
              
         driver = GraphDatabase.driver(uri, auth=(user, password))
         driver.verify_connectivity()
@@ -131,7 +133,6 @@ if driver is None:
 # VISUAL DESIGN SYSTEM
 # =============================================================================
 
-# Sync: Generator uses :Phone {type:'Fax'} (not :Entity), :Insurer node, COVERS (not INSURES_VEHICLE)
 COLOR_MAP = {
     "Claim": "#4A90A4",
     "Claimant": "#5DADE2",
@@ -151,7 +152,6 @@ COLOR_MAP = {
     "Insurer": "#1A5276",
 }
 
-# Sync: SHARES_DEVICE->HAS_PHONE, INSURES_VEHICLE->COVERS, added new rels
 RELATIONSHIP_LABELS = {
     "FILED_BY": "filed by",
     "TREATED_AT": "treated at",
@@ -173,12 +173,7 @@ RELATIONSHIP_LABELS = {
 }
 
 # =============================================================================
-# SCENARIO DEFINITIONS
-# Sync notes:
-#   S1 Hop2: SHARES_DEVICE->HAS_PHONE, :Entity->:Phone {type:'Fax'}
-#   S1 Hop3: SHARED_FAX_S1->FAX_S1_SHARED, same rel/label changes
-#   S3 Hop2: INSURES_VEHICLE->COVERS
-#   All other hops unchanged (verified per scenario_schema_audit.md)
+# SCENARIO DEFINITIONS (unchanged - all 4 scenarios remain identical)
 # =============================================================================
 
 SCENARIOS = {
@@ -772,7 +767,7 @@ def get_neighborhood(entity_type, entity_id, hops):
         return list(result)
 
 # =============================================================================
-# PAGE: SCENARIO WALKTHROUGH (original - unchanged)
+# PAGE: SCENARIO WALKTHROUGH (unchanged)
 # =============================================================================
 
 def render_scenario_walkthrough():
@@ -944,7 +939,7 @@ def render_scenario_walkthrough():
                 st.markdown(f"{i}. {action}")
 
 # =============================================================================
-# PAGE: FREE EXPLORATION (original - unchanged)
+# PAGE: FREE EXPLORATION (unchanged)
 # =============================================================================
 
 def render_free_exploration():
@@ -1061,7 +1056,7 @@ def render_free_exploration():
         agraph(data['nodes'], data['edges'], config)
 
 # =============================================================================
-# PAGE: ADMINISTRATION (original - unchanged)
+# PAGE: ADMINISTRATION (unchanged)
 # =============================================================================
 
 def render_admin():
@@ -1128,12 +1123,10 @@ def render_admin():
                 st.warning("Check confirmation box to proceed.")
 
 # =============================================================================
-# INVESTIGATION ASSISTANT - LLM-Powered Graph Exploration
+# INVESTIGATION ASSISTANT - REFACTORED FOR GPT-4o-mini
 # =============================================================================
 
-# --- Schema & Prompts (per schema_prompt_refinement.md) ---
-# Schema describes ONLY data structure - no fraud interpretations.
-# Fraud discovery happens via graph traversal, not prompt hints.
+# --- Schema Definitions ---
 
 GRAPH_SCHEMA_DEFINITION = """
 === INSURANCE KNOWLEDGE GRAPH SCHEMA ===
@@ -1202,17 +1195,6 @@ RELATIONSHIPS:
 (Person)-[:FORMER_EMPLOYEE_OF {role, dates, end_reason}]->(Provider)
 """
 
-SYSTEM_PROMPT = """You are a veteran P&C insurance SIU analyst with 20 years of fraud investigation experience. You have access to your organization's claims data through a Neo4j knowledge graph.
-
-Your investigative principles:
-- START with the data, not with assumptions. Let the graph reveal patterns.
-- THINK in networks — fraud operates through relationships, not isolated transactions.
-- QUANTIFY everything — exposure in dollars, patterns in counts, anomalies in standard deviations from peers.
-- DISTINGUISH evidence from inference. State what the data shows before interpreting what it means.
-- RECOMMEND concrete next steps — who to investigate, what to subpoena, which claims to review.
-
-You communicate findings with the precision and confidence of a seasoned investigator presenting to an SIU review board."""
-
 SCHEMA_INVESTIGATION_GUIDE = """
 RELATIONSHIP CHAINS FOR COMMON INVESTIGATIONS:
 - Insurance chain: Person -[:HAS_POLICY]-> Policy -[:COVERS]-> Vehicle; Claim -[:UNDER_POLICY]-> Policy
@@ -1227,115 +1209,200 @@ DATA VOLUME CONTEXT:
 - Fraud patterns emerge from relationship density and structural anomalies, not from any single node property
 """
 
-INVESTIGATION_PLANNER_PROMPT = """You are a veteran P&C insurance fraud analyst with 20 years of SIU experience, planning an investigation using a Neo4j knowledge graph.
+SCHEMA_LITE = """
+GRAPH SCHEMA (Insurance Knowledge Graph):
+
+NODES: Claim (id, claim_amount, claim_date, status, claim_type, incident_type) | Person (id, name, role) | Provider (id, name, specialty, status, npi) | Attorney (id, name, firm, status, bar_number) | Vehicle (id, vin, make, model, year, value) | Policy (id, policy_number, bind_date, premium) | Address (id, street, city, state, zip) | Phone (id, number, type) | Location (id, name, type, area) | Insurer (id, name)
+
+RELATIONSHIPS:
+(Claim)-[:FILED_BY {role}]->(Person)
+(Claim)-[:TREATED_AT]->(Provider)
+(Claim)-[:REPRESENTED_BY {hours_to_retain}]->(Attorney)
+(Claim)-[:HANDLED_BY]->(Person)
+(Claim)-[:WITNESSED_BY]->(Person)
+(Claim)-[:OCCURRED_AT]->(Location)
+(Claim)-[:INVOLVES_VEHICLE]->(Vehicle)
+(Claim)-[:INVOLVED {role}]->(Person)
+(Claim)-[:UNDER_POLICY]->(Policy)
+(Person)-[:HAS_PHONE]->(Phone)
+(Person)-[:LIVES_AT]->(Address)
+(Person)-[:HAS_POLICY]->(Policy)
+(Policy)-[:COVERS]->(Vehicle)
+(Policy)-[:INSURED_BY]->(Insurer)
+(Attorney)-[:HAS_PHONE]->(Phone)
+(Provider)-[:OWNED_BY]->(Person)
+(Person)-[:FORMER_EMPLOYEE_OF]->(Provider)
+"""
+
+# --- Few-Shot Examples (Pattern-Neutral) ---
+
+FEW_SHOT_EXAMPLES_LITE = """
+EXAMPLE QUERIES:
+
+Q: Tell me about a specific provider's claims
+MATCH (p:Provider)<-[:TREATED_AT]-(c:Claim)
+WHERE p.name CONTAINS 'Wellness' OR p.id = $provider_id
+OPTIONAL MATCH (c)-[:FILED_BY]->(person:Person)
+OPTIONAL MATCH (c)-[:REPRESENTED_BY]->(a:Attorney)
+RETURN p, c, person, a
+LIMIT 50
+
+Q: Which providers have the most claims?
+MATCH (p:Provider)<-[:TREATED_AT]-(c:Claim)
+WITH p, count(c) AS claim_count, sum(c.claim_amount) AS total_exposure
+RETURN p.name AS provider, p.id AS id, claim_count, total_exposure
+ORDER BY claim_count DESC LIMIT 10
+
+Q: Show the network around a specific entity
+MATCH path = (root {id: $entity_id})-[*1..2]-(connected)
+UNWIND relationships(path) AS r
+WITH DISTINCT startNode(r) AS a, r, endNode(r) AS b
+RETURN a, r, b
+"""
+
+FEW_SHOT_EXAMPLES_FULL = """
+EXAMPLE QUERIES:
+
+Q: Tell me about a provider — their claims, who files them, and who represents them
+MATCH (p:Provider)<-[:TREATED_AT]-(c:Claim)
+WHERE p.name CONTAINS 'Wellness' OR p.id = $provider_id
+OPTIONAL MATCH (c)-[:FILED_BY]->(person:Person)
+OPTIONAL MATCH (c)-[:REPRESENTED_BY]->(a:Attorney)
+RETURN p, c, person, a
+LIMIT 50
+
+Q: Which providers have the most claims, and how many distinct attorneys appear?
+MATCH (p:Provider)<-[:TREATED_AT]-(c:Claim)
+WITH p, count(c) AS claim_count, sum(c.claim_amount) AS total_exposure
+OPTIONAL MATCH (p)<-[:TREATED_AT]-(c2:Claim)-[:REPRESENTED_BY]->(a:Attorney)
+WITH p, claim_count, total_exposure, count(DISTINCT a) AS attorney_count
+RETURN p.name AS provider, p.id AS id, claim_count, total_exposure, attorney_count
+ORDER BY claim_count DESC LIMIT 10
+
+Q: Find two entities of the same type that are both connected to a common node
+MATCH (n1)-[r1]->(shared)<-[r2]-(n2)
+WHERE n1 <> n2 AND id(n1) < id(n2)
+RETURN n1, r1, shared, r2, n2
+LIMIT 25
+
+Q: Show the full neighborhood within 2 hops of a specific entity
+MATCH path = (root {id: $entity_id})-[*1..2]-(connected)
+UNWIND relationships(path) AS r
+WITH DISTINCT startNode(r) AS a, r, endNode(r) AS b
+RETURN a, r, b
+
+Q: Find claims within a date range and show who filed them
+MATCH (c:Claim)-[:FILED_BY]->(p:Person)
+WHERE c.claim_date >= '2023-01-01' AND c.claim_date <= '2023-12-31'
+OPTIONAL MATCH (c)-[:TREATED_AT]->(prov:Provider)
+OPTIONAL MATCH (c)-[:UNDER_POLICY]->(pol:Policy)
+RETURN p.name AS claimant, c.id AS claim_id, c.claim_amount AS amount,
+       c.claim_date AS date, prov.name AS provider, pol.policy_number AS policy
+ORDER BY c.claim_date
+LIMIT 50
+"""
+
+# --- Prompts ---
+
+SYSTEM_PROMPT = """You are a veteran P&C insurance SIU analyst with 20 years of fraud investigation experience. You have access to your organization's claims data through a Neo4j knowledge graph.
+
+Your investigative principles:
+- START with the data, not with assumptions. Let the graph reveal patterns.
+- THINK in networks — fraud operates through relationships, not isolated transactions.
+- QUANTIFY everything — exposure in dollars, patterns in counts, anomalies in standard deviations from peers.
+- DISTINGUISH evidence from inference. State what the data shows before interpreting what it means.
+- RECOMMEND concrete next steps — who to investigate, what to subpoena, which claims to review.
+
+You communicate findings with the precision and confidence of a seasoned investigator presenting to an SIU review board."""
+
+REASONING_PROMPT = """You are an insurance SIU analyst planning a graph database investigation.
 
 GRAPH SCHEMA:
 {schema}
 
-INVESTIGATION CONTEXT (recent queries):
+RECENT CONVERSATION:
 {chat_history}
 
-USER QUESTION: {question}
+QUESTION: {question}
 
-TASK: Think step-by-step about what data you need, then produce an investigation plan.
+Think about what the user needs and write a brief investigation approach (2-5 sentences). Include:
+- What entities and relationships are central to answering this
+- Whether you need aggregations (counts, sums, averages) or network exploration (neighborhood, connections)
+- What specific node IDs, names, or properties to filter on if mentioned in the question
 
-STEP 1 - UNDERSTAND: What is the user actually asking? Restate in precise investigation terms.
+Write your approach as plain text. Do not write any Cypher queries."""
 
-STEP 2 - IDENTIFY: What entities and relationships are central? What graph patterns would answer this?
+CYPHER_GENERATION_PROMPT = """You are an expert Cypher query writer for a Neo4j insurance knowledge graph.
 
-STEP 3 - PLAN QUERIES: Design 1-3 Cypher queries that progressively build the answer.
-- Query 1 should address the core question directly
-- Query 2 (if needed) should expand context or corroborate
-- Query 3 (only for complex investigations) should find connecting evidence
+SCHEMA:
+{schema}
 
-INVESTIGATION PATTERNS (use as analytical templates, not answers):
-- Provider assessment: Check claim volume, attorney concentration ratio, compare to peer benchmarks via aggregation
-- Network mapping: Start with 1-hop neighborhood, look for shared connections (e.g., two entities linking to the same node)
-- Temporal analysis: Compare dates across connected entities (bind_date vs claim_date, opened_date vs revocation_date)
-- Identity linkage: Trace through Phone, Address, Device nodes to find hidden connections between People
-- Corporate tracing: Follow OWNED_BY and FORMER_EMPLOYEE_OF chains to find organizational connections
+INVESTIGATION APPROACH:
+{reasoning}
 
-CYPHER GUIDELINES:
-- Return nodes AND relationships for visualization: prefer RETURN a, r, b patterns
-- Use OPTIONAL MATCH for secondary data to avoid losing primary results
-- Include aggregations (COUNT, SUM, AVG) when the question implies comparison
-- Use parameterized patterns: {{id: 'VALUE'}} (double braces for format string safety)
-- For neighborhood exploration: MATCH path = (root)-[*1..N]-(connected) then UNWIND relationships(path)
-- LIMIT large result sets to 50 rows
+QUESTION: {question}
 
-OUTPUT FORMAT - Respond with ONLY this JSON structure, no other text:
-{{
-  "reasoning": "Brief explanation of investigation approach (2-3 sentences)",
-  "complexity": "simple|moderate|complex",
-  "queries": [
-    {{
-      "purpose": "What this query reveals",
-      "cypher": "THE CYPHER QUERY",
-      "depends_on": null
-    }}
-  ]
-}}
+{few_shot_examples}
 
-For sequential queries where Query 2 needs results from Query 1, set depends_on to the index (0-based) and use a placeholder like $PREV_RESULT that you will describe in the purpose field. The system will handle substitution.
+RULES:
+1. Output ONLY Cypher queries. No explanations, no markdown fences, no comments.
+2. Return nodes AND relationships for visualization: use RETURN a, r, b patterns.
+3. Use OPTIONAL MATCH for secondary data so primary results aren't lost.
+4. LIMIT result sets to 50 rows maximum.
+5. If two queries are needed, separate them with a line containing only: ---
+6. Prefer explicit relationship types over variable-length paths for clarity.
+7. For aggregations, include both the aggregate result AND the underlying entities.
 
-IMPORTANT: Output ONLY valid JSON. No markdown fences, no explanation outside the JSON."""
+QUERY:"""
 
-REFLECTION_PROMPT = """You are reviewing investigation results to determine if you have enough evidence to answer the original question.
+CYPHER_FIX_PROMPT = """The following Cypher query failed against a Neo4j database.
 
-ORIGINAL QUESTION: {question}
+FAILED QUERY:
+{failed_query}
 
-INVESTIGATION PLAN: {reasoning}
+ERROR MESSAGE:
+{error_message}
 
-QUERIES EXECUTED AND RESULTS:
-{query_results}
+GRAPH SCHEMA (relationship directions):
+{schema_relationships_only}
 
-ASSESSMENT TASK:
-1. Did the queries return the data needed to answer the question?
-2. Is there a critical gap - a specific piece of information that would significantly strengthen the answer?
-3. If yes, what ONE additional query would fill that gap?
+Fix the query. Common issues:
+- Wrong relationship direction (check schema above)
+- Referencing properties that don't exist on that node type
+- Missing parentheses or brackets
+- Using labels that don't exist in the schema
 
-OUTPUT FORMAT - Respond with ONLY this JSON, no other text:
-{{
-  "sufficient": true or false,
-  "gap": "Description of missing information (or null if sufficient)",
-  "corrective_query": "Cypher query to fill the gap (or null if sufficient)"
-}}
+Output ONLY the corrected Cypher query. No explanations."""
 
-Only request a corrective query if results are genuinely insufficient. Empty results on a well-formed query may themselves be informative (absence of evidence). Do not fish for data you merely find interesting — focus on what the user asked."""
+SYNTHESIS_PROMPT = """You are a veteran insurance fraud investigator chatting with a colleague about what you found in the claims database.
 
-ANALYST_SYNTHESIS_PROMPT = """You are a veteran P&C insurance SIU analyst presenting findings to your investigation team.
+QUESTION THEY ASKED: {question}
 
-ORIGINAL QUESTION: {question}
+YOUR INVESTIGATION APPROACH: {reasoning}
 
-INVESTIGATION SUMMARY:
-{investigation_summary}
-
-EVIDENCE (query results):
+QUERY RESULTS:
 {all_results}
 
-Synthesize your findings following this structure:
-
-**FINDING**: One-sentence headline of what the data shows.
-
-**EVIDENCE**: Cite specific entities, relationships, and numbers from the results. Name names, reference claim IDs, state dollar amounts. Connect the dots explicitly — show the chain of connections.
-
-**SEVERITY**: Assess as one of:
-- ROUTINE — normal patterns, no concern
-- NOTABLE — unusual but not conclusive, warrants monitoring
-- CONCERNING — multiple indicators suggesting coordinated activity
-- CRITICAL — strong evidence of organized fraud requiring immediate action
-
-**EXPOSURE**: Quantify dollar impact where possible. Use claim_amount sums, counts, and averages from the data. If exact figures aren't available, provide a reasoned estimate with stated assumptions.
-
-**NEXT STEPS**: 2-4 specific, actionable recommendations. Reference concrete entities or queries that should be investigated further.
+Respond naturally, as if you're explaining your findings to a fellow SIU analyst over coffee. Be specific — name names, cite claim IDs, state dollar amounts. Connect the dots by walking through the chain of relationships you found.
 
 GUIDELINES:
-- Write for insurance professionals — use industry terminology naturally
-- Be precise: "Dr. Smith's clinic treated 45 claimants, all represented by 3 attorneys sharing one fax" not "there seem to be some connections"
-- Distinguish between what the data SHOWS and what it SUGGESTS — evidence vs. inference
-- If results are empty or inconclusive, say so directly and explain what the absence might mean
-- Keep it concise — findings, not essays"""
+- Start with your headline finding in one plain sentence.
+- Walk through the evidence conversationally. "So I pulled up Metro Care and here's what jumped out..." is better than "FINDING: Provider exhibits anomalous patterns."
+- If you found something suspicious, say what makes it suspicious and how confident you are. Distinguish what the data shows from what you think it means.
+- If the results are unremarkable, say so honestly. "Looks clean to me" is a valid finding.
+- If the queries returned empty results or errors, acknowledge it and suggest what might have gone wrong or what to try instead.
+- Quantify when you can — dollar exposure, counts, percentages, deviations from averages.
+- Keep it concise — 3-6 sentences for simple findings, up to 2-3 short paragraphs for complex network discoveries.
+- End with 2-3 suggested follow-up questions that dig deeper into the most interesting aspect of what you found.
 
+FORMAT YOUR FOLLOW-UPS LIKE THIS (after your main analysis):
+
+---FOLLOW_UPS---
+First follow-up question here
+Second follow-up question here
+Third follow-up question here
+
+The follow-up questions should be answerable by querying the graph (not general knowledge) and should build on what was just discovered. Use specific entity names or IDs from the results when relevant."""
 
 QUICK_QUERIES = [
     "Show me the highest-volume providers and their attorney connections",
@@ -1350,97 +1417,7 @@ QUICK_QUERIES = [
     "Find claims where policy bind date is close to claim date",
 ]
 
-
-def configure_llm():
-    """Configure available LLM providers. Azure OpenAI (4o-mini and 4o), Groq secondary."""
-    available = {}
-    
-    if AZURE_OPENAI_AVAILABLE:
-        try:
-            cfg = st.secrets.get("azure_openai", {})
-            endpoint = cfg.get("endpoint")
-            apikey = cfg.get("api_key")
-            apiversion = cfg.get("api_version", "2024-12-01-preview")
-            deployment_4o = cfg.get("deployment_4o", "gpt-4o")
-            deployment_4o_mini = cfg.get("deployment_4o_mini", "gpt-4o-mini")
-            
-            if endpoint and apikey:
-                client = AzureOpenAI(
-                    azure_endpoint=endpoint,
-                    api_key=apikey,
-                    api_version=apiversion
-                )
-                
-                # GPT-4o-mini (default)
-                available["azure_openai_mini"] = {
-                    "client": client,
-                    "model": deployment_4o_mini,
-                    "name": "Azure OpenAI GPT-4o-mini",
-                    "type": "azure_openai"
-                }
-                
-                # GPT-4o
-                available["azure_openai_4o"] = {
-                    "client": client,
-                    "model": deployment_4o,
-                    "name": "Azure OpenAI GPT-4o",
-                    "type": "azure_openai"
-                }
-        except Exception:
-            pass  # Azure OpenAI primary...
-
-    
-    # Groq (secondary / free tier)
-    if GROQ_AVAILABLE:
-        try:
-            api_key = st.secrets.get("groq", {}).get("api_key")
-            if api_key and len(api_key) > 10:
-                client = Groq(api_key=api_key)
-                available['groq'] = {
-                    'client': client,
-                    'model': 'llama-3.3-70b-versatile',
-                    'name': 'Groq (Llama 3.3 70B)',
-                    'type': 'groq'
-                }
-        except Exception:
-            pass
-    
-    return available
-
-
-def call_llm(config, prompt, temperature=0.3, max_tokens=2000):
-    """Call LLM provider with a single prompt. Tracks session cost estimate."""
-    try:
-        response = config['client'].chat.completions.create(
-            model=config['model'],
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-        result = response.choices[0].message.content.strip()
-        
-        # Lightweight cost tracking
-        if 'llm_call_count' not in st.session_state:
-            st.session_state.llm_call_count = 0
-            st.session_state.llm_token_estimate = 0
-        st.session_state.llm_call_count += 1
-        st.session_state.llm_token_estimate += len(prompt) // 4 + len(result) // 4
-        
-        return result
-    except Exception as e:
-        return f"LLM Error: {str(e)}"
-
-
-def _parse_llm_json(raw_text):
-    """Parse JSON from LLM output, stripping markdown fences if present."""
-    clean = raw_text.strip()
-    if clean.startswith("```"):
-        clean = clean.split("\n", 1)[-1]
-    if clean.endswith("```"):
-        clean = clean.rsplit("```", 1)[0]
-    clean = clean.strip()
-    return json.loads(clean)
-
+# --- Helper Functions ---
 
 def _serialize_records_for_llm(records, max_rows=15):
     """Serialize Neo4j records into JSON-safe dicts for LLM consumption."""
@@ -1459,18 +1436,12 @@ def _serialize_records_for_llm(records, max_rows=15):
 
 
 def get_graph_schema_context():
-    """Build schema context enriched with investigation guide and live data stats.
-    
-    Layers:
-    1. GRAPH_SCHEMA_DEFINITION — node types, properties, relationships
-    2. SCHEMA_INVESTIGATION_GUIDE — relationship chains and data volume context
-    3. Live data stats — high-volume providers, attorneys, database summary
-    """
+    """Build schema context enriched with investigation guide and live data stats."""
     schema = GRAPH_SCHEMA_DEFINITION + SCHEMA_INVESTIGATION_GUIDE
     
     try:
         with driver.session() as session:
-            # Database summary — gives the LLM a sense of scale
+            # Database summary
             summary = session.run("""
                 MATCH (n)
                 WITH labels(n)[0] AS label, count(n) AS cnt
@@ -1483,7 +1454,7 @@ def get_graph_schema_context():
                 for label, cnt in label_counts.items():
                     schema += f"  - {label}: {cnt} nodes\n"
             
-            # High-volume providers with attorney concentration
+            # High-volume providers
             result = session.run("""
                 MATCH (p:Provider)<-[:TREATED_AT]-(c:Claim)
                 WITH p, count(c) as claim_count
@@ -1527,18 +1498,313 @@ def get_graph_schema_context():
     return schema
 
 
-def render_investigation_assistant():
-    """Render the AI-powered investigation assistant page.
-    
-    Pipeline: Think → Plan → Query (multi-step) → Reflect (complex only) → Synthesize
-    Complexity-aware: simple (2 LLM calls), moderate (2), complex (3-4).
+def get_schema_for_query(is_deep):
+    """Return appropriate schema context based on query complexity."""
+    if is_deep:
+        return get_graph_schema_context()
+    else:
+        return SCHEMA_LITE
+
+
+def classify_query_complexity(question):
     """
+    Classify user question as 'simple' or 'deep' using keyword heuristics.
+    """
+    question_lower = question.lower()
+    
+    # Deep indicators
+    deep_patterns = [
+        # Network/relationship analysis
+        "connected", "network", "relationship", "linked", "shared",
+        "between", "connection", "ring", "pattern", "cluster",
+        # Comparison/aggregation
+        "compare", "average", "anomal", "unusual", "suspicious",
+        "higher than", "lower than", "deviation", "peer",
+        # Multi-entity
+        "all claims", "all providers", "all attorneys", "every",
+        "across", "multiple",
+        # Temporal
+        "timeline", "before", "after", "tenure", "duration",
+        "how long", "when did",
+        # Investigation-style
+        "investigate", "probe", "dig into", "follow up",
+        "what else", "who else", "any other",
+        # Explicit complexity
+        "complete network", "full history", "everything about",
+    ]
+    
+    for pattern in deep_patterns:
+        if pattern in question_lower:
+            return "deep"
+    
+    return "simple"
+
+
+def _extract_relationship_section(schema):
+    """Extract just the RELATIONSHIPS section from the full schema string."""
+    lines = schema.split("\n")
+    in_section = False
+    result = []
+    for line in lines:
+        if "RELATIONSHIPS:" in line:
+            in_section = True
+        if in_section:
+            result.append(line)
+            if in_section and line.strip() == "" and len(result) > 5:
+                break
+    return "\n".join(result) if result else schema[:1000]
+
+
+def plan_investigation(llm_config, schema, chat_history, question, is_deep):
+    """
+    Two-call pipeline: Reason about approach, then generate Cypher.
+    
+    Returns:
+        dict with keys:
+            - reasoning (str): Plain text investigation approach
+            - queries (list[str]): 1-2 Cypher query strings
+    """
+    # Call 1: Reasoning
+    reason_prompt = REASONING_PROMPT.format(
+        schema=schema,
+        chat_history=chat_history or "No prior context.",
+        question=question
+    )
+    reasoning = call_llm(llm_config, reason_prompt, temperature=0.3, max_tokens=300)
+    
+    if reasoning.startswith("LLM Error"):
+        return {"reasoning": "", "queries": []}
+    
+    # Call 2: Cypher generation
+    few_shots = FEW_SHOT_EXAMPLES_FULL if is_deep else FEW_SHOT_EXAMPLES_LITE
+    
+    cypher_prompt = CYPHER_GENERATION_PROMPT.format(
+        schema=schema,
+        reasoning=reasoning,
+        question=question,
+        few_shot_examples=few_shots
+    )
+    cypher_raw = call_llm(llm_config, cypher_prompt, temperature=0.1, max_tokens=800)
+    
+    if cypher_raw.startswith("LLM Error"):
+        return {"reasoning": reasoning, "queries": []}
+    
+    # Parse: strip markdown fences if present, split on ---
+    cypher_clean = cypher_raw.strip()
+    if cypher_clean.startswith("```"):
+        cypher_clean = cypher_clean.split("\n", 1)[-1]
+    if cypher_clean.endswith("```"):
+        cypher_clean = cypher_clean.rsplit("```", 1)[0]
+    cypher_clean = cypher_clean.strip()
+    
+    queries = [q.strip() for q in cypher_clean.split("---") if q.strip()]
+    
+    # Safety cap: max 2 queries
+    queries = queries[:2]
+    
+    return {"reasoning": reasoning, "queries": queries}
+
+
+def execute_cypher_with_retry(query, llm_config, schema):
+    """
+    Execute a Cypher query. On failure, attempt one LLM-powered fix.
+    
+    Returns:
+        tuple: (records: list, executed_query: str, had_error: bool)
+    """
+    # First attempt
+    try:
+        records = run_query(query)
+        return (records, query, False)
+    except Exception as e:
+        error_msg = str(e)[:300]
+    
+    # Extract relationships section for fix prompt
+    schema_rels = _extract_relationship_section(schema)
+    
+    fix_prompt = CYPHER_FIX_PROMPT.format(
+        failed_query=query,
+        error_message=error_msg,
+        schema_relationships_only=schema_rels
+    )
+    
+    fixed_cypher = call_llm(llm_config, fix_prompt, temperature=0.0, max_tokens=500)
+    
+    if fixed_cypher.startswith("LLM Error"):
+        return ([], query, True)
+    
+    # Clean markdown fences
+    fixed_clean = fixed_cypher.strip()
+    if fixed_clean.startswith("```"):
+        fixed_clean = fixed_clean.split("\n", 1)[-1]
+    if fixed_clean.endswith("```"):
+        fixed_clean = fixed_clean.rsplit("```", 1)[0]
+    fixed_clean = fixed_clean.strip()
+    
+    # Second attempt with fixed query
+    try:
+        records = run_query(fixed_clean)
+        return (records, fixed_clean, False)
+    except Exception:
+        return ([], query, True)
+
+
+def enrich_visualization(query_results_records, all_records):
+    """
+    Extract entity IDs from results and fetch their neighborhoods for visualization.
+    """
+    # Extract entity IDs from serialized results
+    entity_ids = set()
+    
+    for qr in query_results_records:
+        for row in qr.get("data", []):
+            for key, value in row.items():
+                if isinstance(value, dict):
+                    node_id = value.get("id")
+                    if node_id:
+                        entity_ids.add(node_id)
+                elif isinstance(value, str):
+                    if any(value.startswith(prefix) for prefix in 
+                           ["PROV_", "ATT_", "P_", "CLM_", "VEH_", "POL_", "FAX_", "DEVICE_",
+                            "ADDR_", "LOC_", "ADJ_", "INS_"]):
+                        entity_ids.add(value)
+    
+    # Extract existing node IDs
+    existing_node_ids = set()
+    for record in all_records:
+        for value in record.values():
+            if value and hasattr(value, 'labels'):
+                props = dict(value)
+                nid = props.get('id')
+                if nid:
+                    existing_node_ids.add(nid)
+    
+    # Find missing IDs
+    missing_ids = entity_ids - existing_node_ids
+    
+    if not missing_ids:
+        return []
+    
+    # Fetch 1-hop neighborhoods for up to 5 missing entities
+    ids_to_fetch = list(missing_ids)[:5]
+    
+    enrichment_records = []
+    for eid in ids_to_fetch:
+        try:
+            with driver.session() as session:
+                result = session.run("""
+                    MATCH (root {id: $eid})-[r]-(neighbor)
+                    RETURN root, r, neighbor
+                    LIMIT 30
+                """, eid=eid)
+                enrichment_records.extend(list(result))
+        except Exception:
+            continue
+    
+    return enrichment_records
+
+
+def parse_synthesis_response(response_text):
+    """
+    Split synthesis response into main analysis and follow-up questions.
+    """
+    if "---FOLLOW_UPS---" in response_text:
+        parts = response_text.split("---FOLLOW_UPS---", 1)
+        analysis = parts[0].strip()
+        follow_up_text = parts[1].strip()
+        follow_ups = [q.strip() for q in follow_up_text.split("\n") if q.strip()]
+        follow_ups = follow_ups[:3]
+        return (analysis, follow_ups)
+    else:
+        return (response_text.strip(), [])
+
+
+# --- LLM Configuration ---
+
+def configure_llm():
+    """Configure available LLM providers."""
+    available = {}
+    
+    if AZURE_OPENAI_AVAILABLE:
+        try:
+            cfg = st.secrets.get("azure_openai", {})
+            endpoint = cfg.get("endpoint")
+            apikey = cfg.get("api_key")
+            apiversion = cfg.get("api_version", "2024-12-01-preview")
+            deployment_4o = cfg.get("deployment_4o", "gpt-4o")
+            deployment_4o_mini = cfg.get("deployment_4o_mini", "gpt-4o-mini")
+            
+            if endpoint and apikey:
+                client = AzureOpenAI(
+                    azure_endpoint=endpoint,
+                    api_key=apikey,
+                    api_version=apiversion
+                )
+                
+                available["azure_openai_mini"] = {
+                    "client": client,
+                    "model": deployment_4o_mini,
+                    "name": "Azure OpenAI GPT-4o-mini",
+                    "type": "azure_openai"
+                }
+                
+                available["azure_openai_4o"] = {
+                    "client": client,
+                    "model": deployment_4o,
+                    "name": "Azure OpenAI GPT-4o",
+                    "type": "azure_openai"
+                }
+        except Exception:
+            pass
+    
+    if GROQ_AVAILABLE:
+        try:
+            api_key = st.secrets.get("groq", {}).get("api_key")
+            if api_key and len(api_key) > 10:
+                client = Groq(api_key=api_key)
+                available['groq'] = {
+                    'client': client,
+                    'model': 'llama-3.3-70b-versatile',
+                    'name': 'Groq (Llama 3.3 70B)',
+                    'type': 'groq'
+                }
+        except Exception:
+            pass
+    
+    return available
+
+
+def call_llm(config, prompt, temperature=0.3, max_tokens=2000):
+    """Call LLM provider with a single prompt."""
+    try:
+        response = config['client'].chat.completions.create(
+            model=config['model'],
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        result = response.choices[0].message.content.strip()
+        
+        # Cost tracking
+        if 'llm_call_count' not in st.session_state:
+            st.session_state.llm_call_count = 0
+            st.session_state.llm_token_estimate = 0
+        st.session_state.llm_call_count += 1
+        st.session_state.llm_token_estimate += len(prompt) // 4 + len(result) // 4
+        
+        return result
+    except Exception as e:
+        return f"LLM Error: {str(e)}"
+
+
+# --- Main Page Renderer ---
+
+def render_investigation_assistant():
+    """Render the AI-powered investigation assistant page."""
     st.title("🤖 Investigation Assistant")
     st.caption("AI-powered natural language querying of the insurance knowledge graph")
     
-    # ------------------------------------------------------------------
     # LLM availability check
-    # ------------------------------------------------------------------
     available_providers = configure_llm()
     
     if not available_providers:
@@ -1552,7 +1818,8 @@ def render_investigation_assistant():
         endpoint = "https://your-resource.openai.azure.com/"
         api_key = "your-key"
         api_version = "2024-12-01-preview"
-        deployment_name = "gpt-4o-mini"
+        deployment_4o_mini = "gpt-4o-mini"
+        deployment_4o = "gpt-4o"
         ```
         
         **Groq (free tier):**
@@ -1563,21 +1830,17 @@ def render_investigation_assistant():
         """)
         return
     
-    # ------------------------------------------------------------------
-    # Sidebar: LLM controls + cost tracker
-    # ------------------------------------------------------------------
+    # Sidebar: LLM controls
     with st.sidebar:
         st.markdown("### 🤖 Assistant Settings")
         
         if "selected_provider" not in st.session_state:
-            # Default to GPT-4o-mini
             if "azure_openai_mini" in available_providers:
                 st.session_state.selected_provider = "azure_openai_mini"
             elif "azure_openai_4o" in available_providers:
                 st.session_state.selected_provider = "azure_openai_4o"
             else:
                 st.session_state.selected_provider = list(available_providers.keys())[0]
-
         
         provider_key = st.selectbox(
             "LLM Provider",
@@ -1596,24 +1859,19 @@ def render_investigation_assistant():
             st.session_state.llm_token_estimate = 0
             st.rerun()
         
-        # Cost tracker display
         if st.session_state.get('llm_call_count'):
             st.caption(
                 f"Session: {st.session_state.llm_call_count} LLM calls | "
                 f"~{st.session_state.get('llm_token_estimate', 0):,} tokens"
             )
     
-    # ------------------------------------------------------------------
     # Initialize chat state
-    # ------------------------------------------------------------------
     if "assistant_messages" not in st.session_state:
         st.session_state.assistant_messages = []
     if "assistant_chat_history" not in st.session_state:
         st.session_state.assistant_chat_history = []
     
-    # ------------------------------------------------------------------
     # Quick queries
-    # ------------------------------------------------------------------
     st.markdown("#### Quick Queries")
     cols = st.columns(3)
     for i, q in enumerate(QUICK_QUERIES[:9]):
@@ -1623,10 +1881,8 @@ def render_investigation_assistant():
     
     st.markdown("---")
     
-    # ------------------------------------------------------------------
-    # Display chat history (with embedded graphs from prior turns)
-    # ------------------------------------------------------------------
-    for msg in st.session_state.assistant_messages:
+    # Display chat history with follow-ups
+    for idx, msg in enumerate(st.session_state.assistant_messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             if msg.get("graph_nodes") and msg.get("graph_edges"):
@@ -1635,10 +1891,19 @@ def render_investigation_assistant():
             if msg.get("cypher"):
                 with st.expander("🔍 Cypher Queries"):
                     st.code(msg["cypher"], language="cypher")
+            # Show follow-ups only for the LAST assistant message
+            if (msg["role"] == "assistant" 
+                and msg.get("follow_ups") 
+                and idx == len(st.session_state.assistant_messages) - 1):
+                st.markdown("**Continue investigating:**")
+                cols = st.columns(min(len(msg["follow_ups"]), 3))
+                for i, q in enumerate(msg["follow_ups"]):
+                    with cols[i]:
+                        if st.button(q[:60] + "..." if len(q) > 60 else q, key=f"hist_fu_{idx}_{i}"):
+                            st.session_state.assistant_pending = q
+                            st.rerun()
     
-    # ------------------------------------------------------------------
-    # Handle input (typed or quick-query click)
-    # ------------------------------------------------------------------
+    # Handle input
     user_input = st.chat_input("Ask about the insurance graph...")
     
     if hasattr(st.session_state, 'assistant_pending') and st.session_state.assistant_pending:
@@ -1657,139 +1922,68 @@ def render_investigation_assistant():
     
     with st.chat_message("assistant"):
         
-        # ==============================================================
-        # STEP A: Plan Investigation (Think + Generate Cypher)
-        # ==============================================================
-        with st.spinner("Planning investigation..."):
-            schema = get_graph_schema_context()
-            
-            chat_history_text = ""
-            for h in st.session_state.assistant_chat_history[-5:]:
-                chat_history_text += f"User: {h['question']}\nApproach: {h.get('reasoning', '')}\n\n"
-            
-            plan_prompt = INVESTIGATION_PLANNER_PROMPT.format(
-                schema=schema,
-                chat_history=chat_history_text or "No prior context.",
-                question=user_input
-            )
-            plan_raw = call_llm(llm_config, plan_prompt, temperature=0.2)
+        # STEP 1: Classify complexity (code, no LLM)
+        is_deep = classify_query_complexity(user_input) == "deep"
+        schema = get_schema_for_query(is_deep)
         
-        # Parse the JSON plan — fallback to treating raw output as single Cypher
-        if not plan_raw or plan_raw.startswith("LLM Error"):
-            error_msg = f"Failed to plan investigation: {plan_raw}"
-            st.error(error_msg)
-            st.session_state.assistant_messages.append({"role": "assistant", "content": error_msg})
+        # STEP 2: Plan investigation (2 LLM calls)
+        chat_history_text = ""
+        for h in st.session_state.assistant_chat_history[-5:]:
+            chat_history_text += f"Q: {h['question']}\nApproach: {h.get('reasoning', '')}\n\n"
+        
+        with st.spinner("Thinking..."):
+            plan = plan_investigation(llm_config, schema, chat_history_text, user_input, is_deep)
+        
+        reasoning = plan["reasoning"]
+        queries = plan["queries"]
+        
+        if not queries:
+            fallback_msg = ("I wasn't able to translate that into a graph query. "
+                          "Could you rephrase? For example, try asking about a specific "
+                          "provider, attorney, claim, or vehicle by name or ID.")
+            st.markdown(fallback_msg)
+            st.session_state.assistant_messages.append({
+                "role": "assistant", "content": fallback_msg
+            })
             return
         
-        try:
-            plan = _parse_llm_json(plan_raw)
-        except (json.JSONDecodeError, ValueError):
-            # Fallback: LLM returned raw Cypher instead of JSON
-            raw_cypher = plan_raw.strip()
-            if raw_cypher.startswith("```"):
-                raw_cypher = raw_cypher.split("\n", 1)[-1]
-            if raw_cypher.endswith("```"):
-                raw_cypher = raw_cypher.rsplit("```", 1)[0]
-            plan = {
-                "reasoning": "Direct query generation",
-                "complexity": "simple",
-                "queries": [{"purpose": "Answer the question", "cypher": raw_cypher.strip(), "depends_on": None}]
-            }
+        # Show plan (collapsed)
+        with st.expander("🧠 Investigation approach", expanded=False):
+            st.markdown(reasoning)
         
-        complexity = plan.get("complexity", "simple")
-        reasoning = plan.get("reasoning", "")
-        planned_queries = plan.get("queries", [])[:3]  # Cap at 3
+        # STEP 3: Execute queries with retry
+        all_records = []
+        query_results_text = []
+        all_cypher = []
+        had_any_error = False
         
-        # Show the investigation plan
-        with st.expander(f"🧠 Investigation Plan ({complexity})", expanded=False):
-            st.markdown(f"**Approach:** {reasoning}")
-            for i, q in enumerate(planned_queries):
-                st.markdown(f"**Query {i+1}:** {q.get('purpose', 'N/A')}")
-        
-        # ==============================================================
-        # STEP B: Execute Planned Queries Sequentially
-        # ==============================================================
-        all_records = []          # Neo4j record objects for visualization
-        query_results_text = []   # Serialized results for LLM prompts
-        all_cypher = []           # All executed Cypher strings
-        
-        for i, q in enumerate(planned_queries):
-            cypher = q.get("cypher", "").strip()
-            if not cypher:
-                continue
-            
-            all_cypher.append(cypher)
-            purpose = q.get("purpose", f"Query {i+1}")
-            
-            with st.spinner(f"Query {i+1}/{len(planned_queries)}: {purpose[:60]}..."):
-                try:
-                    records = run_query(cypher)
-                    all_records.extend(records if records else [])
-                    
-                    serialized = _serialize_records_for_llm(records)
-                    query_results_text.append({
-                        "query_index": i + 1,
-                        "purpose": purpose,
-                        "cypher": cypher,
-                        "result_count": len(records) if records else 0,
-                        "data": serialized
-                    })
-                except Exception as e:
-                    query_results_text.append({
-                        "query_index": i + 1,
-                        "purpose": purpose,
-                        "cypher": cypher,
-                        "error": str(e)[:200]
-                    })
-        
-        # ==============================================================
-        # STEP C: Reflect (complex queries only)
-        # ==============================================================
-        if complexity == "complex" and any(
-            qr.get("result_count", 0) > 0 for qr in query_results_text
-        ):
-            with st.spinner("Reviewing evidence completeness..."):
-                reflect_prompt = REFLECTION_PROMPT.format(
-                    question=user_input,
-                    reasoning=reasoning,
-                    query_results=json.dumps(query_results_text, indent=2, default=str)
+        for i, cypher in enumerate(queries):
+            with st.spinner(f"Querying graph ({i+1}/{len(queries)})..."):
+                records, executed_query, had_error = execute_cypher_with_retry(
+                    cypher, llm_config, schema
                 )
-                reflect_raw = call_llm(llm_config, reflect_prompt, temperature=0.1)
+                all_records.extend(records)
+                all_cypher.append(executed_query)
+                had_any_error = had_any_error or had_error
                 
-                try:
-                    reflection = _parse_llm_json(reflect_raw)
-                    
-                    if not reflection.get("sufficient") and reflection.get("corrective_query"):
-                        corrective = reflection["corrective_query"].strip()
-                        all_cypher.append(corrective)
-                        gap_desc = reflection.get("gap", "Fill evidence gap")
-                        
-                        with st.spinner(f"Corrective query: {gap_desc[:60]}..."):
-                            try:
-                                records = run_query(corrective)
-                                all_records.extend(records if records else [])
-                                
-                                serialized = _serialize_records_for_llm(records)
-                                query_results_text.append({
-                                    "query_index": len(all_cypher),
-                                    "purpose": f"Corrective: {gap_desc}",
-                                    "cypher": corrective,
-                                    "result_count": len(records) if records else 0,
-                                    "data": serialized
-                                })
-                            except Exception:
-                                pass  # Corrective failed — proceed with what we have
-                except (json.JSONDecodeError, ValueError):
-                    pass  # Reflection parse failed — proceed with what we have
+                serialized = _serialize_records_for_llm(records)
+                query_results_text.append({
+                    "query_index": i + 1,
+                    "cypher": executed_query,
+                    "result_count": len(records),
+                    "data": serialized,
+                    "auto_corrected": had_error and len(records) > 0
+                })
         
-        # ==============================================================
-        # STEP D: Build Visualization from ALL Collected Records
-        # ==============================================================
+        # STEP 4: Visualization enrichment (no LLM)
+        enrichment_records = enrich_visualization(query_results_text, all_records)
+        all_records.extend(enrichment_records)
+        
+        # STEP 5: Build visualization
         graph_nodes = []
         graph_edges = []
         
         if all_records:
-            # Gather node IDs across all query results, then fetch interconnecting rels
             node_ids = set()
             for record in all_records:
                 for value in record.values():
@@ -1802,43 +1996,59 @@ def render_investigation_assistant():
         if graph_nodes:
             st.info(
                 f"📊 **{len(graph_nodes)} entities** | "
-                f"**{len(graph_edges)} connections** | "
-                f"**{len(all_cypher)} {'query' if len(all_cypher) == 1 else 'queries'}** executed"
+                f"**{len(graph_edges)} connections**"
             )
             config = get_graph_config(width="100%", height=500)
             agraph(graph_nodes, graph_edges, config)
-        elif all_cypher:
-            st.warning("Queries returned no graph-visualizable results.")
         
-        # Show all executed Cypher in a single expander
-        with st.expander(f"🔍 Executed Queries ({len(all_cypher)})"):
+        # Show executed queries
+        with st.expander(f"🔍 Queries executed ({len(all_cypher)})"):
             for i, c in enumerate(all_cypher):
-                st.markdown(f"**Query {i+1}:**")
                 st.code(c, language="cypher")
+                if query_results_text[i].get("auto_corrected"):
+                    st.caption("→ Auto-corrected after initial error")
         
-        # ==============================================================
-        # STEP E: Analyst Synthesis
-        # ==============================================================
-        with st.spinner("Synthesizing findings..."):
-            synthesis_prompt = ANALYST_SYNTHESIS_PROMPT.format(
+        # STEP 6: Synthesize findings (1 LLM call)
+        with st.spinner("Analyzing findings..."):
+            synthesis_prompt = SYNTHESIS_PROMPT.format(
                 question=user_input,
-                investigation_summary=reasoning,
+                reasoning=reasoning,
                 all_results=json.dumps(query_results_text, indent=2, default=str)
             )
-            response_text = call_llm(llm_config, synthesis_prompt, temperature=0.3)
+            response_text = call_llm(llm_config, synthesis_prompt, temperature=0.4)
         
-        if response_text:
-            st.markdown(response_text)
+        # STEP 7: Display analysis + follow-ups
+        if response_text and not response_text.startswith("LLM Error"):
+            analysis_text, follow_ups = parse_synthesis_response(response_text)
+            st.markdown(analysis_text)
+            
+            # Render follow-up buttons
+            if follow_ups:
+                st.markdown("**Continue investigating:**")
+                cols = st.columns(min(len(follow_ups), 3))
+                for i, q in enumerate(follow_ups):
+                    with cols[i]:
+                        if st.button(
+                            q[:60] + "..." if len(q) > 60 else q,
+                            key=f"followup_{len(st.session_state.assistant_messages)}_{i}"
+                        ):
+                            st.session_state.assistant_pending = q
+                            st.rerun()
+        else:
+            analysis_text = ("I ran into an issue generating the analysis. "
+                           "The graph results are shown above — try asking "
+                           "a more specific question about what you see.")
+            follow_ups = []
+            st.markdown(analysis_text)
         
-        # ----------------------------------------------------------
-        # Store message for chat history replay
-        # ----------------------------------------------------------
+        # STEP 8: Store in chat history
         st.session_state.assistant_messages.append({
             "role": "assistant",
-            "content": response_text or "Analysis unavailable.",
+            "content": analysis_text,
             "graph_nodes": graph_nodes if graph_nodes else None,
             "graph_edges": graph_edges if graph_edges else None,
-            "cypher": "\n---\n".join(all_cypher) if all_cypher else None
+            "cypher": "\n---\n".join(all_cypher) if all_cypher else None,
+            "follow_ups": follow_ups
         })
         
         st.session_state.assistant_chat_history.append({
@@ -1879,10 +2089,7 @@ st.sidebar.markdown("""
 
 st.sidebar.divider()
 
-# =============================================================================
-# ROUTING
-# =============================================================================
-
+# Routing
 if page == "🎯 Scenario Walkthrough":
     render_scenario_walkthrough()
 elif page == "🤖 Investigation Assistant":

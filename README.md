@@ -211,7 +211,7 @@ fraud-graph-demo/
 | Component | Purpose | Technology |
 |-----------|---------|------------|
 | **Graph Database** | Store entities + relationships | Neo4j AuraDB (free tier) |
-| **LLM** | Convert questions to Cypher | Google Gemini 1.5 Flash |
+| **LLM** | Convert questions to Cypher | GPT 4o, 4o-mini & Groq |
 | **Frontend** | Interactive web interface | Streamlit |
 | **Visualization** | Render fraud networks | streamlit-agraph |
 

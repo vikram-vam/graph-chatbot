@@ -251,10 +251,9 @@ SCENARIOS = {
                 "graph_insight": "<strong>Instant Quantification:</strong> The graph isolates all claims flowing through the collusion network: <strong>45 claims x $3,600 = $162,000</strong> in provable exposure. All claims now deniable for fraud.",
                 "business_impact": "20% variance alone was not actionable. Proving collusion makes 100% of claims deniable.",
                 "query": """
-                    MATCH (phone:Phone {id: 'PH_S1_SHARED'})<-[:HAS_PHONE]-(a:Attorney)<-[:REPRESENTED_BY]-(c:Claim)-[:TREATED_AT]->(p:Provider {id: 'PROV_S1_MAIN'})
+                    MATCH (phone:Phone {id: 'PH_S1_SHARED'})<-[:HAS_PHONE]-(a:Attorney)
                     MATCH (a)-[:LOCATED_AT]->(addr:Address {id: 'ADDR_S1_SHARED'})
-                    MATCH (c)-[:FILED_BY]->(per:Person)
-                    RETURN phone, addr, a, c, p, per
+                    RETURN phone, a, addr
                 """
             }
         ],

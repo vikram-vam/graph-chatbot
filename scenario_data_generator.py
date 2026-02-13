@@ -4,7 +4,7 @@ Insurance Fraud Scenario Data Generator
 
 Generates research-grounded fraud scenarios for demonstrating graph DB advantages:
 
-1. "Spider Web" - Provider-Attorney Collusion via Shared Fax (45 claims)
+1. "Spider Web" - Provider-Attorney Collusion via Shared Phone & Address (45 claims)
 2. "Role Chameleon" - Crash-for-Cash Ring with Role Rotation (4 claims)
 3. "Immortal Asset" - Vehicle Recycling & Policy Hopping (3 claims)
 4. "Network Migration" - Post-Prosecution Network Evolution (49 claims)
@@ -21,6 +21,9 @@ Version: 3.0 - Refined per scenario_schema_audit.md and schema_prompt_refinement
   - Removed explicit fraud markers (scenario, total_loss_count, fraud_confirmed, etc.)
   - Added missing properties: npi, bar_number, policy_number, claim_type, phone.type
   - Uses single :Person label (no :Claimant or :Adjuster dual labels)
+Version: 3.1 - Scenario 1 fax→phone+address update
+  - Changed FAX_S1_SHARED to PH_S1_SHARED with type 'Office'
+  - Added ADDR_S1_SHARED shared by all 3 S1 attorneys
 """
 
 import random
@@ -423,12 +426,12 @@ class ScenarioDataGenerator:
     
     def create_spider_web(self):
         """
-        Provider-Attorney Collusion via Shared Fax/Device
+        Provider-Attorney Collusion via Shared Phone & Address
         
         - 45 claims through one suspicious provider
         - 100% attorney representation (vs normal 10-15%)
         - All funneled through 3 "independent" attorneys
-        - Hidden link: All 3 attorneys share the same fax number (Phone node)
+        - Hidden link: All 3 attorneys share the same office phone AND business address
         - Total exposure: $162,000
         """
         print("🕸️ Creating Scenario 1: Spider Web (Provider-Attorney Collusion)...")
@@ -446,17 +449,30 @@ class ScenarioDataGenerator:
             })
         """, id=prov_id, npi=self._generate_npi())
         
-        # The shared fax number — Phone node with type 'Fax'
-        fax_id = "FAX_S1_SHARED"
+        # The shared office phone — Phone node with type 'Office'
+        phone_id = "PH_S1_SHARED"
         self._run_query("""
             CREATE (:Phone {
                 id: $id, 
                 number: '(555) 019-9999', 
-                type: 'Fax'
+                type: 'Office'
             })
-        """, id=fax_id)
+        """, id=phone_id)
         
-        # Three "independent" attorneys (actually sharing fax)
+        # The shared business address — exclusive to S1 attorneys
+        shared_addr_id = "ADDR_S1_SHARED"
+        self._run_query("""
+            CREATE (:Address {
+                id: $id,
+                street: '1455 Peachtree Rd NE, Suite 340',
+                city: 'Atlanta',
+                state: 'GA',
+                zip: '30309',
+                type: 'Commercial'
+            })
+        """, id=shared_addr_id)
+        
+        # Three "independent" attorneys (actually sharing phone + address)
         attorneys = [
             ("ATT_S1_A", "Smith & Associates", "Personal Injury"),
             ("ATT_S1_B", "Doe Legal Group", "Auto Accidents"),
@@ -465,7 +481,8 @@ class ScenarioDataGenerator:
         
         for att_id, name, specialty in attorneys:
             self._run_query("""
-                MATCH (fax:Phone {id: $fid})
+                MATCH (phone:Phone {id: $phone_id})
+                MATCH (addr:Address {id: $addr_id})
                 CREATE (a:Attorney {
                     id: $id, 
                     name: $name, 
@@ -473,8 +490,10 @@ class ScenarioDataGenerator:
                     status: 'Active',
                     bar_number: $bar
                 })
-                CREATE (a)-[:HAS_PHONE]->(fax)
-            """, fid=fax_id, id=att_id, name=name, specialty=specialty,
+                CREATE (a)-[:HAS_PHONE]->(phone)
+                CREATE (a)-[:LOCATED_AT]->(addr)
+            """, phone_id=phone_id, addr_id=shared_addr_id,
+                id=att_id, name=name, specialty=specialty,
                 bar=self._generate_bar_number())
         
         # Generate 45 claims (all represented, rotating through 3 attorneys)
@@ -520,7 +539,7 @@ class ScenarioDataGenerator:
                 hours=random.randint(1, 4)
             )
         
-        print("   ✓ Created: 1 provider, 3 attorneys, 1 shared fax (Phone), 45 claims")
+        print("   ✓ Created: 1 provider, 3 attorneys, 1 shared phone, 1 shared address, 45 claims")
         print("   ✓ Total exposure: ~$162,000")
     
     # =========================================================================

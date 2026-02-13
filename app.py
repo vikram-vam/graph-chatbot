@@ -231,15 +231,16 @@ SCENARIOS = {
             },
             {
                 "depth": 2,
-                "title": "The Hidden Link (OCR Discovery)",
-                "narrative": "Three attorneys with different names and tax IDs. Are they truly independent competitors? We check for shared attributes extracted from unstructured documents.",
-                "traditional": "No SQL join exists between these attorney entities. They appear in separate tables with no foreign key relationship. <strong>Investigation stalls here.</strong>",
-                "graph_insight": "<strong>The Breakthrough:</strong> OCR extraction from demand letter headers reveals all 3 'competing' attorneys share the <strong>same fax number</strong>: (555) 019-9999. They operate from the same office suite - a single operation masquerading as three independent firms.",
-                "business_impact": "This link exists only in scanned PDFs - completely invisible to relational queries.",
+                "title": "The Hidden Link (Shared Infrastructure)",
+                "narrative": "Three attorneys with different names and tax IDs. Are they truly independent competitors? We check for shared infrastructure.",
+                "traditional": "No SQL join exists between these attorney entities. They appear in separate tables with no foreign key relationship. Checking for shared addresses requires manual cross-referencing of billing records. <strong>Investigation stalls here.</strong>",
+                "graph_insight": "<strong>The Breakthrough:</strong> All 3 'competing' attorneys share the <strong>same office phone number</strong>: (555) 019-9999 AND the <strong>same business address</strong>: 1455 Peachtree Rd NE, Suite 340. They operate from the same office suite - a single operation masquerading as three independent firms.",
+                "business_impact": "Shared infrastructure patterns are invisible without explicit relationship modeling.",
                 "query": """
                     MATCH (p:Provider {id: 'PROV_S1_MAIN'})<-[:TREATED_AT]-(c:Claim)-[:REPRESENTED_BY]->(a:Attorney)
-                    MATCH (a)-[:HAS_PHONE]->(fax:Phone {type: 'Fax'})
-                    RETURN p, c, a, fax
+                    MATCH (a)-[:HAS_PHONE]->(phone:Phone)
+                    MATCH (a)-[:LOCATED_AT]->(addr:Address)
+                    RETURN p, c, a, phone, addr
                 """
             },
             {
@@ -250,9 +251,10 @@ SCENARIOS = {
                 "graph_insight": "<strong>Instant Quantification:</strong> The graph isolates all claims flowing through the collusion network: <strong>45 claims x $3,600 = $162,000</strong> in provable exposure. All claims now deniable for fraud.",
                 "business_impact": "20% variance alone was not actionable. Proving collusion makes 100% of claims deniable.",
                 "query": """
-                    MATCH (fax:Phone {id: 'FAX_S1_SHARED'})<-[:HAS_PHONE]-(a:Attorney)<-[:REPRESENTED_BY]-(c:Claim)-[:TREATED_AT]->(p:Provider {id: 'PROV_S1_MAIN'})
+                    MATCH (phone:Phone {id: 'PH_S1_SHARED'})<-[:HAS_PHONE]-(a:Attorney)<-[:REPRESENTED_BY]-(c:Claim)-[:TREATED_AT]->(p:Provider {id: 'PROV_S1_MAIN'})
+                    MATCH (a)-[:LOCATED_AT]->(addr:Address {id: 'ADDR_S1_SHARED'})
                     MATCH (c)-[:FILED_BY]->(per:Person)
-                    RETURN fax, a, c, p, per
+                    RETURN phone, addr, a, c, p, per
                 """
             }
         ],
@@ -260,12 +262,12 @@ SCENARIOS = {
             "exposure": "$162,000 (45 claims x $3,600 avg)",
             "traditional_time": "3-4 weeks manual file review",
             "graph_time": "45 seconds",
-            "key_finding": "20% billing variance alone was not actionable. Graph proved three 'independent' law firms are a single operation - making all 45 claims deniable for fraud conspiracy.",
+            "key_finding": "20% billing variance alone was not actionable. Graph proved three 'independent' law firms share the same phone number and business address - they're a single operation. All 45 claims are deniable for fraud conspiracy.",
             "actions": [
                 "Deny all 45 claims citing proven collusion",
                 "Flag Metro Care Clinic for SIU investigation",
                 "File complaint with State Bar regarding shell firm structure",
-                "Add shared fax/device pattern to fraud detection rules"
+                "Add shared phone/address pattern to fraud detection rules"
             ]
         }
     },
@@ -1234,6 +1236,8 @@ RELATIONSHIPS:
 (Policy)-[:COVERS]->(Vehicle)
 (Policy)-[:INSURED_BY]->(Insurer)
 (Attorney)-[:HAS_PHONE]->(Phone)
+(Attorney)-[:LOCATED_AT]->(Address)
+(Provider)-[:LOCATED_AT]->(Address)
 (Provider)-[:OWNED_BY]->(Person)
 (Person)-[:FORMER_EMPLOYEE_OF]->(Provider)
 
@@ -1241,7 +1245,7 @@ COMMON INVESTIGATION CHAINS:
 - Provider investigation: (Provider)<-[:TREATED_AT]-(Claim)-[:FILED_BY]->(Person), (Claim)-[:REPRESENTED_BY]->(Attorney)
 - Person investigation: (Person)<-[:FILED_BY]-(Claim), (Person)<-[:INVOLVED]-(Claim), (Person)<-[:WITNESSED_BY]-(Claim)
 - Vehicle investigation: (Vehicle)<-[:INVOLVES_VEHICLE]-(Claim)-[:FILED_BY]->(Person), (Person)-[:HAS_POLICY]->(Policy)-[:COVERS]->(Vehicle)
-- Attorney investigation: (Attorney)<-[:REPRESENTED_BY]-(Claim)-[:TREATED_AT]->(Provider), (Attorney)-[:HAS_PHONE]->(Phone)
+- Attorney investigation: (Attorney)<-[:REPRESENTED_BY]-(Claim)-[:TREATED_AT]->(Provider), (Attorney)-[:HAS_PHONE]->(Phone), (Attorney)-[:LOCATED_AT]->(Address)
 """
 
 # GAP-4: Extended FEW_SHOT_EXAMPLES_LITE with multi-hop example
@@ -1400,6 +1404,8 @@ Person/Attorney/Policy outbound relationships:
   (Person)-[:HAS_POLICY]->(Policy)
   (Person)-[:FORMER_EMPLOYEE_OF]->(Provider)
   (Attorney)-[:HAS_PHONE]->(Phone)
+  (Attorney)-[:LOCATED_AT]->(Address)
+  (Provider)-[:LOCATED_AT]->(Address)
   (Policy)-[:COVERS]->(Vehicle)
   (Policy)-[:INSURED_BY]->(Insurer)
   (Provider)-[:OWNED_BY]->(Person)
@@ -1451,7 +1457,7 @@ QUERY RESULTS:
 ANALYTICAL FRAMEWORK — What experienced investigators look for in results:
 - REPRESENTATION RATES: If >50% of a provider's patients have attorney representation (normal is 10-15%), that's a red flag for provider-attorney collusion.
 - CONCENTRATION: If one provider sends most patients to 1-3 attorneys (or one attorney sends most clients to 1-2 providers), that suggests a referral arrangement.
-- SHARED INFRASTRUCTURE: Multiple "independent" entities sharing a phone, fax, address, or device fingerprint suggests they're actually the same operation.
+- SHARED INFRASTRUCTURE: Multiple "independent" entities sharing a phone number, address, or device fingerprint suggests they're actually the same operation.
 - ROLE PATTERNS: Same person appearing across multiple claims in different roles (driver, passenger, witness) suggests staged accidents.
 - ASSET HISTORY: A vehicle with multiple total-loss claims under different owners suggests recycling/paper-totaling schemes.
 - TEMPORAL PATTERNS: Very short gaps between policy bind date and claim date (< 60 days) suggest the policy was taken out specifically to file a claim.
@@ -1483,7 +1489,7 @@ QUICK_QUERIES = [
     "Show me the highest-volume providers and their attorney connections",
     "Which claims have the largest dollar exposure?",
     "Find providers with above-average claim amounts",
-    "Are there attorneys sharing the same fax phone number?",
+    "Are there attorneys sharing the same phone number or address?",
     "Show all claims connected to Vehicle VEH_S3_MAIN",
     "What providers have had their licenses revoked?",
     "Find people who appear in multiple claims in different roles",
@@ -1719,7 +1725,7 @@ def enrich_visualization(query_results_records, all_records):
                         entity_ids.add(node_id)
                 elif isinstance(value, str):
                     if any(value.startswith(prefix) for prefix in 
-                           ["PROV_", "ATT_", "P_", "CLM_", "VEH_", "POL_", "FAX_", "DEVICE_",
+                           ["PROV_", "ATT_", "P_", "CLM_", "VEH_", "POL_", "PH_", "DEVICE_",
                             "ADDR_", "LOC_", "ADJ_", "INS_"]):
                         entity_ids.add(value)
     

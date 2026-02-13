@@ -5,12 +5,15 @@ Graph-Powered Investigation Platform for SIU Teams
 Demonstrates how graph database technology reveals hidden fraud networks
 that traditional relational methods consistently miss.
 
-Version: 2.2 - Investigation Assistant optimized for GPT-4o-mini
-               - Split reasoning/Cypher generation
-               - Deterministic complexity routing
-               - Cypher retry with error feedback
-               - Conversational synthesis with follow-ups
-               - Visualization enrichment
+Version: 2.3 - Investigation Assistant Prompt Audit v3 Fixes
+               - GAP-1: System prompt integration in call_llm()
+               - GAP-2: Enhanced REASONING_PROMPT with investigative depth
+               - GAP-3: Relationship direction guards in CYPHER_GENERATION_PROMPT
+               - GAP-4: Multi-hop chain examples in few-shot prompts
+               - GAP-5: Analytical framework in SYNTHESIS_PROMPT
+               - GAP-6: Removed entity leakage from get_graph_schema_context()
+               - GAP-7: Investigation chain patterns in SCHEMA_LITE
+               - GAP-8: Extended complexity router patterns
 """
 
 import streamlit as st
@@ -1123,7 +1126,7 @@ def render_admin():
                 st.warning("Check confirmation box to proceed.")
 
 # =============================================================================
-# INVESTIGATION ASSISTANT - REFACTORED FOR GPT-4o-mini
+# INVESTIGATION ASSISTANT - REFACTORED WITH v3 AUDIT FIXES
 # =============================================================================
 
 # --- Schema Definitions ---
@@ -1209,6 +1212,7 @@ DATA VOLUME CONTEXT:
 - Fraud patterns emerge from relationship density and structural anomalies, not from any single node property
 """
 
+# GAP-7: Extended SCHEMA_LITE with investigation chain patterns
 SCHEMA_LITE = """
 GRAPH SCHEMA (Insurance Knowledge Graph):
 
@@ -1232,10 +1236,15 @@ RELATIONSHIPS:
 (Attorney)-[:HAS_PHONE]->(Phone)
 (Provider)-[:OWNED_BY]->(Person)
 (Person)-[:FORMER_EMPLOYEE_OF]->(Provider)
+
+COMMON INVESTIGATION CHAINS:
+- Provider investigation: (Provider)<-[:TREATED_AT]-(Claim)-[:FILED_BY]->(Person), (Claim)-[:REPRESENTED_BY]->(Attorney)
+- Person investigation: (Person)<-[:FILED_BY]-(Claim), (Person)<-[:INVOLVED]-(Claim), (Person)<-[:WITNESSED_BY]-(Claim)
+- Vehicle investigation: (Vehicle)<-[:INVOLVES_VEHICLE]-(Claim)-[:FILED_BY]->(Person), (Person)-[:HAS_POLICY]->(Policy)-[:COVERS]->(Vehicle)
+- Attorney investigation: (Attorney)<-[:REPRESENTED_BY]-(Claim)-[:TREATED_AT]->(Provider), (Attorney)-[:HAS_PHONE]->(Phone)
 """
 
-# --- Few-Shot Examples (Pattern-Neutral) ---
-
+# GAP-4: Extended FEW_SHOT_EXAMPLES_LITE with multi-hop example
 FEW_SHOT_EXAMPLES_LITE = """
 EXAMPLE QUERIES:
 
@@ -1258,8 +1267,17 @@ MATCH path = (root {id: $entity_id})-[*1..2]-(connected)
 UNWIND relationships(path) AS r
 WITH DISTINCT startNode(r) AS a, r, endNode(r) AS b
 RETURN a, r, b
+
+Q: Show a provider's full claim chain — who files, who represents, any shared infrastructure
+MATCH (p:Provider {id: $provider_id})<-[:TREATED_AT]-(c:Claim)
+OPTIONAL MATCH (c)-[:FILED_BY]->(person:Person)
+OPTIONAL MATCH (c)-[:REPRESENTED_BY]->(a:Attorney)
+OPTIONAL MATCH (a)-[:HAS_PHONE]->(ph:Phone)
+RETURN p, c, person, a, ph
+LIMIT 50
 """
 
+# GAP-4: Extended FEW_SHOT_EXAMPLES_FULL with multi-hop example
 FEW_SHOT_EXAMPLES_FULL = """
 EXAMPLE QUERIES:
 
@@ -1300,6 +1318,14 @@ RETURN p.name AS claimant, c.id AS claim_id, c.claim_amount AS amount,
        c.claim_date AS date, prov.name AS provider, pol.policy_number AS policy
 ORDER BY c.claim_date
 LIMIT 50
+
+Q: Explore a provider's claims and trace who represents those claimants, including any shared contact info
+MATCH (p:Provider {id: $provider_id})<-[:TREATED_AT]-(c:Claim)
+OPTIONAL MATCH (c)-[:FILED_BY]->(person:Person)
+OPTIONAL MATCH (c)-[:REPRESENTED_BY]->(a:Attorney)
+OPTIONAL MATCH (a)-[:HAS_PHONE]->(ph:Phone)
+RETURN p, c, person, a, ph
+LIMIT 50
 """
 
 # --- Prompts ---
@@ -1315,6 +1341,7 @@ Your investigative principles:
 
 You communicate findings with the precision and confidence of a seasoned investigator presenting to an SIU review board."""
 
+# GAP-2: Replaced REASONING_PROMPT with investigative depth
 REASONING_PROMPT = """You are an insurance SIU analyst planning a graph database investigation.
 
 GRAPH SCHEMA:
@@ -1325,13 +1352,24 @@ RECENT CONVERSATION:
 
 QUESTION: {question}
 
-Think about what the user needs and write a brief investigation approach (2-5 sentences). Include:
-- What entities and relationships are central to answering this
-- Whether you need aggregations (counts, sums, averages) or network exploration (neighborhood, connections)
-- What specific node IDs, names, or properties to filter on if mentioned in the question
+Plan your investigation approach in 3-6 sentences. Think like a fraud investigator:
+
+1. IDENTIFY the starting entity (provider, person, vehicle, attorney, claim) and what you know about it.
+2. DECIDE what to measure or explore:
+   - For a PROVIDER: How many claims flow through it? What's the attorney representation rate? Which specific attorneys appear? Do those attorneys share any infrastructure (phones, addresses)?
+   - For a PERSON: How many claims are they connected to? In what roles (claimant, witness, driver, passenger)? Who else appears in those same claims?
+   - For a VEHICLE: How many claims involve this VIN? How many distinct owners/policyholders? What's the gap between policy bind dates and claim dates?
+   - For an ATTORNEY: How many clients? Which providers do those clients use? What's the concentration — do most clients go to one provider?
+   - For a CLAIM: Who filed it, who treated, who represented? Are any of those entities connected to other claims?
+3. STATE whether you need:
+   - Aggregation queries (counts, sums, rates) to quantify patterns
+   - Neighborhood exploration (1-3 hops) to map connections
+   - Both — an aggregation to identify anomalies, then exploration to trace the network
+4. NAME specific entity IDs, names, or properties from the question to filter on.
 
 Write your approach as plain text. Do not write any Cypher queries."""
 
+# GAP-3: Replaced CYPHER_GENERATION_PROMPT with relationship direction guards
 CYPHER_GENERATION_PROMPT = """You are an expert Cypher query writer for a Neo4j insurance knowledge graph.
 
 SCHEMA:
@@ -1343,6 +1381,32 @@ INVESTIGATION APPROACH:
 QUESTION: {question}
 
 {few_shot_examples}
+
+CRITICAL — RELATIONSHIP DIRECTIONS (all relationships start from the left node):
+The Claim node is the HUB — most relationships originate FROM the Claim:
+  (Claim)-[:FILED_BY]->(Person)        — NOT (Person)-[:FILED_BY]->(Claim)
+  (Claim)-[:TREATED_AT]->(Provider)     — NOT (Provider)-[:TREATED_AT]->(Claim)
+  (Claim)-[:REPRESENTED_BY]->(Attorney) — NOT (Attorney)-[:REPRESENTED_BY]->(Claim)
+  (Claim)-[:HANDLED_BY]->(Person)       — NOT (Person)-[:HANDLED_BY]->(Claim)
+  (Claim)-[:WITNESSED_BY]->(Person)     — NOT (Person)-[:WITNESSED_BY]->(Claim)
+  (Claim)-[:OCCURRED_AT]->(Location)
+  (Claim)-[:INVOLVES_VEHICLE]->(Vehicle)
+  (Claim)-[:INVOLVED]->(Person)
+  (Claim)-[:UNDER_POLICY]->(Policy)
+
+Person/Attorney/Policy outbound relationships:
+  (Person)-[:HAS_PHONE]->(Phone)
+  (Person)-[:LIVES_AT]->(Address)
+  (Person)-[:HAS_POLICY]->(Policy)
+  (Person)-[:FORMER_EMPLOYEE_OF]->(Provider)
+  (Attorney)-[:HAS_PHONE]->(Phone)
+  (Policy)-[:COVERS]->(Vehicle)
+  (Policy)-[:INSURED_BY]->(Insurer)
+  (Provider)-[:OWNED_BY]->(Person)
+
+COMMON DIRECTION ERROR: When finding claims for a provider, write:
+  MATCH (p:Provider)<-[:TREATED_AT]-(c:Claim)   CORRECT  (arrow reversed)
+  NOT: MATCH (p:Provider)-[:TREATED_AT]->(c:Claim)  WRONG
 
 RULES:
 1. Output ONLY Cypher queries. No explanations, no markdown fences, no comments.
@@ -1374,6 +1438,7 @@ Fix the query. Common issues:
 
 Output ONLY the corrected Cypher query. No explanations."""
 
+# GAP-5: Extended SYNTHESIS_PROMPT with analytical framework
 SYNTHESIS_PROMPT = """You are a veteran insurance fraud investigator chatting with a colleague about what you found in the claims database.
 
 QUESTION THEY ASKED: {question}
@@ -1383,7 +1448,17 @@ YOUR INVESTIGATION APPROACH: {reasoning}
 QUERY RESULTS:
 {all_results}
 
-Respond naturally, as if you're explaining your findings to a fellow SIU analyst over coffee. Be specific — name names, cite claim IDs, state dollar amounts. Connect the dots by walking through the chain of relationships you found.
+ANALYTICAL FRAMEWORK — What experienced investigators look for in results:
+- REPRESENTATION RATES: If >50% of a provider's patients have attorney representation (normal is 10-15%), that's a red flag for provider-attorney collusion.
+- CONCENTRATION: If one provider sends most patients to 1-3 attorneys (or one attorney sends most clients to 1-2 providers), that suggests a referral arrangement.
+- SHARED INFRASTRUCTURE: Multiple "independent" entities sharing a phone, fax, address, or device fingerprint suggests they're actually the same operation.
+- ROLE PATTERNS: Same person appearing across multiple claims in different roles (driver, passenger, witness) suggests staged accidents.
+- ASSET HISTORY: A vehicle with multiple total-loss claims under different owners suggests recycling/paper-totaling schemes.
+- TEMPORAL PATTERNS: Very short gaps between policy bind date and claim date (< 60 days) suggest the policy was taken out specifically to file a claim.
+- NETWORK CONTINUITY: When a sanctioned provider's associated attorney continues operating with a new provider (especially one opened shortly after the old one closed), the fraud network may have migrated rather than disbanded.
+- EMPLOYMENT/OWNERSHIP LINKS: Current provider owned by former employee of a sanctioned provider = potential phoenix operation.
+
+If the data matches one of these patterns, name it and quantify the exposure. If it doesn't match any pattern, say the results look routine.
 
 GUIDELINES:
 - Start with your headline finding in one plain sentence.
@@ -1435,13 +1510,14 @@ def _serialize_records_for_llm(records, max_rows=15):
     return serialized
 
 
+# GAP-6: Trimmed get_graph_schema_context() to remove entity leakage
 def get_graph_schema_context():
     """Build schema context enriched with investigation guide and live data stats."""
     schema = GRAPH_SCHEMA_DEFINITION + SCHEMA_INVESTIGATION_GUIDE
     
     try:
         with driver.session() as session:
-            # Database summary
+            # Database summary - label counts only (no entity-specific lists)
             summary = session.run("""
                 MATCH (n)
                 WITH labels(n)[0] AS label, count(n) AS cnt
@@ -1453,44 +1529,6 @@ def get_graph_schema_context():
                 schema += "\nLIVE DATABASE SUMMARY:\n"
                 for label, cnt in label_counts.items():
                     schema += f"  - {label}: {cnt} nodes\n"
-            
-            # High-volume providers
-            result = session.run("""
-                MATCH (p:Provider)<-[:TREATED_AT]-(c:Claim)
-                WITH p, count(c) as claim_count
-                WHERE claim_count > 3
-                OPTIONAL MATCH (p)<-[:TREATED_AT]-(c2:Claim)-[:REPRESENTED_BY]->(a:Attorney)
-                WITH p, claim_count, count(DISTINCT a) as attorney_count
-                RETURN p.name as provider, p.id as id, p.status as status,
-                       claim_count, attorney_count
-                ORDER BY claim_count DESC LIMIT 5
-            """)
-            providers = [dict(r) for r in result]
-            
-            if providers:
-                schema += "\nHIGH-VOLUME PROVIDERS:\n"
-                for p in providers:
-                    status_tag = f" [{p['status']}]" if p.get('status') and p['status'] != 'Active' else ""
-                    schema += (f"  - {p['provider']} (id: {p['id']}){status_tag}: "
-                              f"{p['claim_count']} claims, {p['attorney_count']} distinct attorneys\n")
-            
-            # High-volume attorneys
-            att_result = session.run("""
-                MATCH (a:Attorney)<-[:REPRESENTED_BY]-(c:Claim)
-                WITH a, count(c) as claim_count, sum(c.claim_amount) as total_exposure
-                WHERE claim_count > 3
-                RETURN a.name as attorney, a.id as id, claim_count,
-                       total_exposure
-                ORDER BY claim_count DESC LIMIT 5
-            """)
-            attorneys = [dict(r) for r in att_result]
-            
-            if attorneys:
-                schema += "\nHIGH-VOLUME ATTORNEYS:\n"
-                for a in attorneys:
-                    exposure = f"${a['total_exposure']:,.0f}" if a.get('total_exposure') else "N/A"
-                    schema += (f"  - {a['attorney']} (id: {a['id']}): "
-                              f"{a['claim_count']} claims, {exposure} total exposure\n")
     
     except Exception:
         pass
@@ -1506,6 +1544,7 @@ def get_schema_for_query(is_deep):
         return SCHEMA_LITE
 
 
+# GAP-8: Extended classify_query_complexity() with missing patterns
 def classify_query_complexity(question):
     """
     Classify user question as 'simple' or 'deep' using keyword heuristics.
@@ -1531,6 +1570,19 @@ def classify_query_complexity(question):
         "what else", "who else", "any other",
         # Explicit complexity
         "complete network", "full history", "everything about",
+        # Co-reference / continuation patterns
+        "those claims", "those providers", "those attorneys", "that provider",
+        "that attorney", "same people", "same person", "same vehicle",
+        "same address", "same phone", "same device", "same fax",
+        # Quantitative analysis
+        "representation rate", "how many", "what percentage", "what fraction",
+        "exposure", "total amount", "total value",
+        # Infrastructure discovery
+        "share", "common", "overlap", "in common",
+        "device", "fax", "phone number", "address",
+        # Historical / temporal
+        "history", "previously", "former", "prior",
+        "opened", "closed", "revoked", "sanctioned",
     ]
     
     for pattern in deep_patterns:
@@ -1564,18 +1616,19 @@ def plan_investigation(llm_config, schema, chat_history, question, is_deep):
             - reasoning (str): Plain text investigation approach
             - queries (list[str]): 1-2 Cypher query strings
     """
-    # Call 1: Reasoning
+    # GAP-1: Call 1: Reasoning with system prompt
     reason_prompt = REASONING_PROMPT.format(
         schema=schema,
         chat_history=chat_history or "No prior context.",
         question=question
     )
-    reasoning = call_llm(llm_config, reason_prompt, temperature=0.3, max_tokens=300)
+    reasoning = call_llm(llm_config, reason_prompt, temperature=0.3, max_tokens=300,
+                        system_prompt=SYSTEM_PROMPT)
     
     if reasoning.startswith("LLM Error"):
         return {"reasoning": "", "queries": []}
     
-    # Call 2: Cypher generation
+    # GAP-1: Call 2: Cypher generation with dedicated system prompt
     few_shots = FEW_SHOT_EXAMPLES_FULL if is_deep else FEW_SHOT_EXAMPLES_LITE
     
     cypher_prompt = CYPHER_GENERATION_PROMPT.format(
@@ -1584,7 +1637,8 @@ def plan_investigation(llm_config, schema, chat_history, question, is_deep):
         question=question,
         few_shot_examples=few_shots
     )
-    cypher_raw = call_llm(llm_config, cypher_prompt, temperature=0.1, max_tokens=800)
+    cypher_raw = call_llm(llm_config, cypher_prompt, temperature=0.1, max_tokens=800,
+                         system_prompt="You are an expert Neo4j Cypher query writer. Output ONLY valid Cypher. No explanations.")
     
     if cypher_raw.startswith("LLM Error"):
         return {"reasoning": reasoning, "queries": []}
@@ -1774,12 +1828,18 @@ def configure_llm():
     return available
 
 
-def call_llm(config, prompt, temperature=0.3, max_tokens=2000):
-    """Call LLM provider with a single prompt."""
+# GAP-1: Modified call_llm() to accept optional system_prompt
+def call_llm(config, prompt, temperature=0.3, max_tokens=2000, system_prompt=None):
+    """Call LLM provider with a prompt and optional system message."""
     try:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
         response = config['client'].chat.completions.create(
             model=config['model'],
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             temperature=temperature,
             max_tokens=max_tokens
         )
@@ -2008,14 +2068,15 @@ def render_investigation_assistant():
                 if query_results_text[i].get("auto_corrected"):
                     st.caption("→ Auto-corrected after initial error")
         
-        # STEP 6: Synthesize findings (1 LLM call)
+        # GAP-1: STEP 6: Synthesize findings (1 LLM call with system prompt)
         with st.spinner("Analyzing findings..."):
             synthesis_prompt = SYNTHESIS_PROMPT.format(
                 question=user_input,
                 reasoning=reasoning,
                 all_results=json.dumps(query_results_text, indent=2, default=str)
             )
-            response_text = call_llm(llm_config, synthesis_prompt, temperature=0.4)
+            response_text = call_llm(llm_config, synthesis_prompt, temperature=0.4,
+                                    system_prompt=SYSTEM_PROMPT)
         
         # STEP 7: Display analysis + follow-ups
         if response_text and not response_text.startswith("LLM Error"):

@@ -237,10 +237,9 @@ SCENARIOS = {
                 "graph_insight": "<strong>The Breakthrough:</strong> All 3 'competing' attorneys share the <strong>same office phone number</strong>: (555) 019-9999 AND the <strong>same business address</strong>: 1455 Peachtree Rd NE, Suite 340. They operate from the same office suite - a single operation masquerading as three independent firms.",
                 "business_impact": "Shared infrastructure patterns are invisible without explicit relationship modeling.",
                 "query": """
-                    MATCH (p:Provider {id: 'PROV_S1_MAIN'})<-[:TREATED_AT]-(c:Claim)-[:REPRESENTED_BY]->(a:Attorney)
-                    MATCH (a)-[:HAS_PHONE]->(phone:Phone)
-                    MATCH (a)-[:LOCATED_AT]->(addr:Address)
-                    RETURN p, c, a, phone, addr
+                    MATCH (phone:Phone {id: 'PH_S1_SHARED'})<-[:HAS_PHONE]-(a:Attorney)
+                    MATCH (a)-[:LOCATED_AT]->(addr:Address {id: 'ADDR_S1_SHARED'})
+                    RETURN phone, a, addr
                 """
             },
             {
@@ -251,9 +250,10 @@ SCENARIOS = {
                 "graph_insight": "<strong>Instant Quantification:</strong> The graph isolates all claims flowing through the collusion network: <strong>45 claims x $3,600 = $162,000</strong> in provable exposure. All claims now deniable for fraud.",
                 "business_impact": "20% variance alone was not actionable. Proving collusion makes 100% of claims deniable.",
                 "query": """
-                    MATCH (phone:Phone {id: 'PH_S1_SHARED'})<-[:HAS_PHONE]-(a:Attorney)
+                    MATCH (phone:Phone {id: 'PH_S1_SHARED'})<-[:HAS_PHONE]-(a:Attorney)<-[:REPRESENTED_BY]-(c:Claim)-[:TREATED_AT]->(p:Provider {id: 'PROV_S1_MAIN'})
                     MATCH (a)-[:LOCATED_AT]->(addr:Address {id: 'ADDR_S1_SHARED'})
-                    RETURN phone, a, addr
+                    MATCH (c)-[:FILED_BY]->(per:Person)
+                    RETURN phone, addr, a, c, p, per
                 """
             }
         ],

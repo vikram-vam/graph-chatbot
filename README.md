@@ -2,7 +2,7 @@
 
 **Demonstrate the power of graph databases for P&C insurance fraud investigation**
 
-A production-grade demo platform that reveals how Neo4j knowledge graphs discover fraud networks invisible to traditional relational databases and search methods. Built for knowledge-sharing sessions with data science teams and business stakeholders who need compelling "aha moments" that translate to strategic investment in graph technology.
+A production-grade demo platform that reveals how Neo4j knowledge graphs discover fraud networks invisible to traditional relational databases and search methods. Built for business stakeholders who need compelling "aha moments" that translate to strategic investment in graph technology.
 
 ![Platform Status](https://img.shields.io/badge/status-production--ready-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
@@ -187,11 +187,11 @@ Each scenario demonstrates a distinct fraud pattern that graphs detect instantly
                │
         ┌──────┴──────┐
         │             │
-   ┌────▼────┐   ┌───▼────┐
-   │ Neo4j   │   │  LLMs  │
-   │ AuraDB  │   │ GPT-4o │
-   │         │   │ -mini  │
-   └─────────┘   └────────┘
+   ┌────▼────┐    ┌───▼────┐
+   │ Neo4j   │    │  LLMs  │
+   │ AuraDB  │    │ GPT-4o │
+   │         │    │ -mini  │
+   └─────────┘    └────────┘
 ```
 
 ### Core Components

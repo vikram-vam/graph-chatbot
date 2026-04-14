@@ -1117,17 +1117,13 @@ def render_admin():
     
     # Clear Database
     st.markdown("### 🗑️ Clear Database")
-    with st.form("clear_form"):
-        confirm = st.checkbox("Confirm: Delete ALL data")
-        if st.form_submit_button("Clear Database"):
-            if confirm:
-                with driver.session() as session:
-                    session.run("MATCH (n) DETACH DELETE n")
-                st.success("Database cleared.")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.warning("Check confirmation box to proceed.")
+    confirm = st.checkbox("Confirm: Delete ALL data", value=False)
+    if st.button("Clear Database", disabled=not confirm):
+        with driver.session() as session:
+            session.run("MATCH (n) DETACH DELETE n")
+        st.success("Database cleared.")
+        time.sleep(1)
+        st.rerun()
 
 # =============================================================================
 # INVESTIGATION ASSISTANT - REFACTORED WITH v3 AUDIT FIXES

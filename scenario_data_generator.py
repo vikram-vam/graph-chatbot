@@ -602,9 +602,10 @@ class ScenarioDataGenerator:
         for pid, name, curr_addr_id, curr_street in members:
             self._run_query("""
                 CREATE (p:Person {
-                    id: $pid, 
-                    name: $name
-                })
+                        id: $pid, 
+                        name: $name,
+                        role: 'Claimant'
+                    })
                 CREATE (curr_addr:Address {
                     id: $curr_addr_id,
                     street: $curr_street,

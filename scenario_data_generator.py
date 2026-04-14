@@ -160,17 +160,38 @@ class ScenarioDataGenerator:
     # =========================================================================
     
     def generate_name(self):
-        """Generate a realistic name."""
-        first = ["James", "Mary", "John", "Patricia", "Robert", "Jennifer", 
-                 "Michael", "Linda", "David", "Sarah", "William", "Elizabeth",
-                 "Richard", "Barbara", "Joseph", "Susan", "Thomas", "Jessica",
-                 "Charles", "Karen", "Christopher", "Nancy", "Daniel", "Lisa",
-                 "Anthony", "Margaret", "Mark", "Betty", "Donald", "Sandra"]
-        last = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", 
-                "Miller", "Davis", "Rodriguez", "Martinez", "Anderson", "Taylor",
-                "Thomas", "Hernandez", "Moore", "Martin", "Jackson", "Thompson",
-                "White", "Lopez", "Lee", "Gonzalez", "Harris", "Clark", "Lewis"]
-        return f"{random.choice(first)} {random.choice(last)}"
+      """Generate a realistic name."""
+      first = [
+          "James", "Mary", "John", "Patricia", "Robert", "Jennifer",
+          "Michael", "Linda", "David", "Sarah", "William", "Elizabeth",
+          "Richard", "Barbara", "Joseph", "Susan", "Thomas", "Jessica",
+          "Charles", "Karen", "Christopher", "Nancy", "Daniel", "Lisa",
+          "Anthony", "Margaret", "Mark", "Betty", "Donald", "Sandra",
+          "Kevin", "Ashley", "Brian", "Kimberly", "George", "Donna",
+          "Edward", "Carol", "Ronald", "Michelle", "Timothy", "Emily",
+          "Jason", "Amanda", "Jeffrey", "Helen", "Ryan", "Melissa",
+          "Jacob", "Deborah", "Gary", "Stephanie", "Nicholas", "Rebecca",
+          "Eric", "Sharon", "Jonathan", "Laura", "Stephen", "Cynthia",
+          "Larry", "Kathleen", "Justin", "Amy", "Scott", "Angela",
+          "Brandon", "Shirley", "Benjamin", "Anna", "Samuel", "Brenda",
+          "Frank", "Pamela", "Raymond", "Emma", "Gregory", "Virginia",
+      ]
+      last = [
+          "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia",
+          "Miller", "Davis", "Rodriguez", "Martinez", "Anderson", "Taylor",
+          "Thomas", "Hernandez", "Moore", "Martin", "Jackson", "Thompson",
+          "White", "Lopez", "Lee", "Gonzalez", "Harris", "Clark", "Lewis",
+          "Robinson", "Walker", "Perez", "Hall", "Young", "Allen",
+          "Sanchez", "Wright", "King", "Scott", "Green", "Baker",
+          "Adams", "Nelson", "Carter", "Mitchell", "Perez", "Roberts",
+          "Turner", "Phillips", "Campbell", "Parker", "Evans", "Edwards",
+          "Collins", "Stewart", "Morris", "Rogers", "Reed", "Cook",
+          "Morgan", "Bell", "Murphy", "Bailey", "Rivera", "Cooper",
+          "Richardson", "Cox", "Howard", "Ward", "Torres", "Peterson",
+          "Gray", "Ramirez", "James", "Watson", "Brooks", "Kelly",
+          "Sanders", "Price", "Bennett", "Wood", "Barnes", "Ross",
+      ]
+      return f"{random.choice(first)} {random.choice(last)}"
     
     def generate_date(self, days_ago_start=365, days_ago_end=30):
         """Generate a random date within a range."""

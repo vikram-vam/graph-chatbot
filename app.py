@@ -748,13 +748,16 @@ def get_entities_by_type(entity_type):
     with driver.session() as session:
         result = session.run(f"""
             MATCH (n:{entity_type})
-            RETURN n.id AS id, n.name AS name, n.number as number, n.street as street, n.vin as vin
+            RETURN n.id AS id, n.name AS name, n.number AS number,
+                   n.street AS street, n.vin AS vin, n.role AS role
             ORDER BY n.name, n.number
             LIMIT 500
         """)
         entities = []
         for r in result:
             display = r['name'] or r['number'] or r['street'] or r['vin'] or r['id']
+            if r['role'] and r['name']:
+                display = f"{r['name']} ({r['role']})"
             entities.append((r['id'], display))
         return entities
 

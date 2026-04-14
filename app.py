@@ -633,6 +633,11 @@ def create_graph_visualization(records, root_id=None, entity_filters=None):
                         tooltip_lines.append(f"Device: {props['type']}")
                     if props.get('number'):
                         tooltip_lines.append(f"Number: {props['number']}")
+                elif label == "Address":
+                    if props.get('city'):
+                        tooltip_lines.append(f"City: {props['city']}, {props.get('state', '')}")
+                    if props.get('zip'):
+                        tooltip_lines.append(f"ZIP: {props['zip']}")
                 
                 tooltip_lines.append(f"\nID: {node_id}")
                 
@@ -670,6 +675,8 @@ def create_graph_visualization(records, root_id=None, entity_filters=None):
                         props = dict(rel)
                         if props.get('role'):
                             rel_label = f"{rel_label} ({props['role']})"
+                        if props.get('status'):
+                            rel_label = f"{rel_label} [{props['status']}]"
                         
                         edges.append(Edge(
                             source=source,

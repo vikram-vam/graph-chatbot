@@ -673,15 +673,20 @@ def create_graph_visualization(records, root_id=None, entity_filters=None):
                         rel_label = RELATIONSHIP_LABELS.get(rel.type, rel.type.replace("_", " ").lower())
                         
                         props = dict(rel)
+                        edge_title = f"Rel: {rel_label}"
                         if props.get('role'):
                             rel_label = f"{rel_label} ({props['role']})"
+                        if props.get('status'):
+                            edge_title = f"Rel: {rel_label}\nStatus: {props['status']}"
+                        else:
+                            edge_title = f"Rel: {rel_label}"
                         if props.get('status'):
                             rel_label = f"{rel_label} [{props['status']}]"
                         
                         edges.append(Edge(
                             source=source,
                             target=target,
-                            title=f"Rel: {rel_label}",
+                            title=edge_title,
                             label=rel_label,
                             color="#888888",
                             width=2,

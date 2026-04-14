@@ -678,8 +678,6 @@ def create_graph_visualization(records, root_id=None, entity_filters=None):
                             rel_label = f"{rel_label} ({props['role']})"
                         if props.get('status'):
                             edge_title = f"Rel: {rel_label}\nStatus: {props['status']}"
-                        else:
-                            edge_title = f"Rel: {rel_label}"
                         
                         edges.append(Edge(
                             source=source,
